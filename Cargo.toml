@@ -1,0 +1,11 @@
+[package]
+name = "fm_log_report"
+version = "0.0.1"
+authors = ["Rob Johnston <rob.johnston@joyent.com>"]
+license = "MIT"
+
+[dependencies]
+chrono = "0.4"
+getopts = "0.2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
