@@ -3,7 +3,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 //
-// Copyright (c) 2019, Joyent, Inc.
+// Copyright 2019 Joyent, Inc.
 //
 extern crate chrono;
 use chrono::prelude::*;
@@ -46,8 +46,51 @@ pub struct Ereport {
 #[derive(Debug, Deserialize)]
 struct Detector {
     scheme: String,
+
+    // fields specific to dev-scheme detectors
     #[serde(rename = "device-path")]
     device_path: Option<String>,
+
+    // fields specific to hc-scheme detectors
+    #[serde(rename = "hc-list")]
+    hc_list: Option<Vec<HcPair>>,
+
+    // fields specific to fmd-scheme detectors
+    #[serde(rename = "mod-name")]
+    mod_name: Option<String>,
+}
+
+impl Detector {
+    pub fn get_fmristr(&mut self) -> Result<String, Box<dyn Error>> {
+        match self.scheme.as_ref() {
+            "dev" => {
+                Ok(format!("dev://{}", self.device_path.as_mut().unwrap()))
+            }
+            "hc" => {
+                let mut fmristr = String::from("hc://");
+                for hcpair in self.hc_list.as_mut().unwrap() {
+                    fmristr.push_str(format!("/{}={}", hcpair.hc_name,
+                        hcpair.hc_id).as_ref());
+                }
+                Ok(fmristr)
+            }
+            "fmd" => {
+                Ok(format!("fmd:///mpdule/{}", self.mod_name.as_mut().unwrap()))
+            }
+            _ => {
+                // XXX - change to return error
+                Ok(String::from("unknown"))
+            }
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct HcPair {
+    #[serde(rename = "hc-name")]
+    hc_name: String,
+    #[serde(rename = "hc-id")]
+    hc_id: String,
 }
 
 #[derive(Debug)]
@@ -137,25 +180,27 @@ fn get_event_timestamp(ev_tod_secs: i64) -> String {
 }
 
 //
-// The Device Hash is a HashMap of DevHashEnt structs, hased by the device
-// path of the ereport detector.  The DevHashEnt struct itself contains a
-// vector of ereports associated with that device path and a hash table of
+// The Device Hash is a HashMap of DevHashEnt structs, hashed by a string that
+// uniquely indentifies the ereport detector.  For I/O ereports, we use the
+// device path as the hash key.  For other hardware ereports, we use string
+// representation of the HC-scheme FMRI. The DevHashEnt struct itself contains
+// a vector of ereports associated with that device path and a hash table of
 // ereport counts hashed by the ereport class name as well as a hash table of
 // ereport counts hashed by the day - using a string timestamp of the form
 // <YYYY>-<MM>-<DD>
 //
 // XXX - should this be a method on DevHashEnt?
 // 
-fn process_dev_event(
+fn process_event(
     device_hash: &mut HashMap<String, DeviceHashEnt>,
-    device_path: &str,
+    key: &str,
     ereport: Ereport
 ) -> Result<(), Box<dyn Error>> {
 
     let ts = get_event_timestamp(ereport.tod[0]);
     let mut new_ts = false;
 
-    match device_hash.entry(device_path.to_string()) {
+    match device_hash.entry(key.to_string()) {
         Entry::Vacant(entry) => {
             entry.insert(DeviceHashEnt::new(ereport, ts));
         }
@@ -223,24 +268,33 @@ pub fn run(config: &Config) -> Result<(), Box<dyn Error>> {
         if !event.class.starts_with("ereport.") {
             continue;
         }
-
         //
-        // For now we skip these classes of ereports as they don't contain a
-        // detector member in the payload.
+        // For now we skip ZFS ereports, as serdes has problems dealing with
+        // some of the numeric fields.
         //
-        if event.class.starts_with("ereport.fm.") ||
-            event.class.starts_with("ereport.fs.") {
+        if event.class.starts_with("ereport.fs.") {
             continue;
         }
 
-        let ereport: Ereport = serde_json::from_str(&line)?;
+        let mut ereport: Ereport = serde_json::from_str(&line)?;
 
-        match ereport.detector.device_path.clone() {
-            Some(dp) => {
-                process_dev_event(&mut device_hash, &dp, ereport)?;
+        match ereport.detector.scheme.as_str() {
+            "dev" => {
+                let dp = ereport.detector.device_path.as_mut().unwrap().clone();
+                process_event(&mut device_hash, &dp, ereport)?;
             }
-            None => {
-                eprintln!("No device path - skipping ({})", event.class);
+            "hc" | "fmd" => {
+                match &ereport.detector.get_fmristr() {
+                    Ok(fmri) => {
+                        process_event(&mut device_hash, &fmri, ereport)?;
+                    }
+                    Err(_) => {
+                        eprintln!("failed to get fmri");
+                    }
+                }
+            }
+            _ => {
+                eprintln!("unsupported detector scheme - skipping");
             }
         }
     }

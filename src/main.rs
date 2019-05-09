@@ -3,7 +3,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 //
-// Copyright (c) 2019, Joyent, Inc.
+// Copyright 2019 Joyent, Inc.
 //
 // This tool post-processes the aggregated, JSON-formatted FMA logs as produced
 // by running:
