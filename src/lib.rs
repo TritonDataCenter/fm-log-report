@@ -18,6 +18,9 @@ use std::fs;
 use std::io::BufRead;
 use std::io::BufReader;
 
+mod hwgrok;
+use hwgrok::HwGrok;
+
 #[derive(Debug)]
 pub struct Config {
     pub fmlog_path: String,
@@ -121,58 +124,6 @@ impl DeviceHashEnt {
     }
 }
 
-//
-// The following structures are used to hold a partial deserialization of the
-// JSON output from hwgrok.  We cross-reference this data with the device paths
-// reported in FMA event telemetry to associate the events with hardware
-// components in hwgrok so we can optionally include this hardware data in the
-// report.
-//
-#[derive(Debug, Default, Deserialize)]
-struct HwGrok {
-    #[serde(rename = "pci-devices")]
-    pci_devices: Vec<HwGrokPciDevices>,
-    #[serde(rename = "drive-bays")]
-    drive_bays: Vec<HwGrokDriveBays>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct HwGrokPciDevices {
-    label: String,
-    #[serde(rename = "hc-fmri")]
-    fmri: String,
-    #[serde(rename = "pci-vendor-name")]
-    pci_vendor_name: String,
-    #[serde(rename = "pci-device-name")]
-    pci_device_name: String,
-    #[serde(rename = "pci-subsystem-name")]
-    pci_subsystem_name: String,
-    #[serde(rename = "device-path")]
-    pci_device_path: String,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct HwGrokDriveBays {
-    label: String,
-    #[serde(rename = "hc-fmri")]
-    fmri: String,
-    disk: Option<HwGrokDisk>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct HwGrokDisk {
-    #[serde(rename = "hc-fmri")]
-    fmri: String,
-    manufacturer: String,
-    model: String,
-    #[serde(rename = "serial-number")]
-    serial_number: String,
-    #[serde(rename = "firmware-revision")]
-    disk_firmware_rev: String,
-    #[serde(rename = "device-path")]
-    disk_device_path: String,
-}
-
 fn get_event_timestamp(ev_tod_secs: i64) -> String {
     let naive = NaiveDateTime::from_timestamp(ev_tod_secs, 0);
     let datetime: DateTime<Utc> = DateTime::from_utc(naive, Utc);
@@ -273,6 +224,13 @@ pub fn run(config: &Config) -> Result<(), Box<dyn Error>> {
         // some of the numeric fields.
         //
         if event.class.starts_with("ereport.fs.") {
+            continue;
+        }
+        //
+        // We also skip fmd ereports related to log errors as their payload
+        // doesn't contain a detector member.
+        //
+        if event.class.starts_with("ereport.fm.fmd.log_") {
             continue;
         }
 
