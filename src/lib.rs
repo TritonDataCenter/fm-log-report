@@ -14,6 +14,7 @@ use serde::Deserialize;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::error::Error;
+use std::fmt;
 use std::fs;
 use std::io::BufRead;
 use std::io::BufReader;
@@ -30,6 +31,17 @@ pub struct Config {
 impl Config {
     pub fn new(fmlog_path: String, hwgrok_path: Option<String>) -> Config {
         Config { fmlog_path, hwgrok_path }
+    }
+}
+
+#[derive(Debug)]
+struct SimpleError(String);                                              
+
+impl Error for SimpleError {}                                            
+                                                                     
+impl fmt::Display for SimpleError {                                      
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 
@@ -81,8 +93,8 @@ impl Detector {
                 Ok(format!("fmd:///mpdule/{}", self.mod_name.as_mut().unwrap()))
             }
             _ => {
-                // XXX - change to return error
-                Ok(String::from("unknown"))
+                Err(Box::new(SimpleError(
+                    format!("unsupported detector scheme"))))
             }
         }
     }
@@ -268,17 +280,17 @@ pub fn run(config: &Config) -> Result<(), Box<dyn Error>> {
             // data then augment the report with that information.
             //
             for drive_bay in &hwgrok.drive_bays {
-                match &drive_bay.disk {
+                match &drive_bay.bay_disk {
                     Some(disk) => {
                         if disk.disk_device_path == devpath.to_string() {
                             println!("{0: <40} {1}", "Disk Location:",
-                                drive_bay.label);
+                                drive_bay.bay_label);
                             println!("{0: <40} {1}", "Disk Manufacturer:",
-                                disk.manufacturer);
+                                disk.disk_manufacturer);
                             println!("{0: <40} {1}", "Disk Model:",
-                                disk.model);
+                                disk.disk_model);
                             println!("{0: <40} {1}", "Disk Serial:",
-                                disk.serial_number);
+                                disk.disk_serial_number);
                             println!("{0: <40} {1}", "Firmware Rev:",
                                 disk.disk_firmware_rev);
                             continue;
